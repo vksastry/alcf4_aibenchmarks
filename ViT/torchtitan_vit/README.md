@@ -128,8 +128,34 @@ PYTHONPATH=$PWD VIT_FLAVOR=large_h48 VIT_VOLUME=256 VIT_CP=12 VIT_DATA_GLOB='/pa
   torchrun --nproc_per_node 12 -m torchtitan.train \
   --module vit3d.recipes --config vit3d_scaling
 
-# Aurora
-qsub -l select=8 -v VIT_VENV=/path/venv,VIT_TP=2,VIT_CP=6,VIT_VOLUME=512 scripts/aurora_vit3d.pbs
+```
+
+### Aurora
+
+The venv must not see the frameworks module's packages (create it without
+`--system-site-packages`), and its own Intel runtime must come first on
+`LD_LIBRARY_PATH`; `scripts/aurora_run.sh` sets this up.
+
+```bash
+# Once, on a login node
+module load frameworks && unset PYTHONPATH
+python -m venv $VENV && source $VENV/bin/activate
+pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/xpu
+pip install h5py
+git clone https://github.com/pytorch/torchtitan && cd torchtitan
+git checkout ff96670a26c7079bc1b9049f5b6942adf35567c1
+pip install -r requirements.txt && pip install -e .
+
+# On a compute node (qsub -I) or in a job: <tiles per node> <config>
+export VIT_VENV=$VENV
+scripts/aurora_run.sh 1 vit3d_debug
+scripts/aurora_run.sh 2 vit3d_debug_fsdp
+VIT_DATA=synthetic VIT_FLAVOR=large_h48 VIT_VOLUME=256 VIT_CP=12 \
+  scripts/aurora_run.sh 12 vit3d_scaling
+
+# Batch job (12 tiles per node, every node in the job)
+qsub -l select=8 -v VIT_VENV=$VENV,VIT_TP=2,VIT_CP=6,VIT_VOLUME=512,VIT_DATA_GLOB='/path/*.h5' \
+  scripts/aurora_vit3d.pbs
 ```
 
 ## Validation
