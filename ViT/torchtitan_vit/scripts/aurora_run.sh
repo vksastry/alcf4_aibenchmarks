@@ -1,36 +1,51 @@
 #!/bin/bash
-# Run the 3D ViT benchmark on Aurora with mpiexec, one rank per GPU tile.
-# Works on an interactive compute node (qsub -I) and inside a PBS job; it
-# uses every node in $PBS_NODEFILE.
+#PBS -A <project>
+#PBS -q debug
+#PBS -l walltime=00:30:00
+#PBS -l filesystems=home:flare
+#PBS -l select=1
+#PBS -j oe
 #
-# Usage:
-#   VIT_VENV=/path/to/venv scripts/aurora_run.sh <tiles per node> <config> [output dir]
+# Run the 3D ViT benchmark on Aurora: one rank per GPU tile, on every node of
+# the job. The same script works both ways:
 #
-# Examples:
-#   export VIT_VENV=/flare/<project>/<user>/.venv_nightly
-#   scripts/aurora_run.sh 1 vit3d_debug                  # one tile
-#   scripts/aurora_run.sh 2 vit3d_debug_fsdp             # two tiles, FSDP
-#   VIT_DATA=synthetic VIT_FLAVOR=large_h48 VIT_VOLUME=256 VIT_CP=12 \
-#     scripts/aurora_run.sh 12 vit3d_scaling             # full node, Ulysses CP
+#   On a compute node (qsub -I), from the torchtitan_vit directory:
+#     VIT_VENV=/path/venv scripts/aurora_run.sh <tiles per node> <config>
+#     VIT_VENV=/path/venv scripts/aurora_run.sh 1 vit3d_debug
+#     VIT_VENV=/path/venv VIT_DATA=synthetic VIT_CP=12 scripts/aurora_run.sh 12 vit3d_scaling
 #
-# Configs are the functions in vit3d/recipes.py. VIT_* variables set in the
-# environment reach every rank; see vit3d_scaling for the list.
+#   As a batch job, submitted from the torchtitan_vit directory (set the
+#   #PBS -A line above first; arguments go in -v as TILES and CONFIG):
+#     qsub -v VIT_VENV=/path/venv,TILES=1,CONFIG=vit3d_debug scripts/aurora_run.sh
+#     qsub -l select=2 -q debug-scaling \
+#       -v VIT_VENV=/path/venv,VIT_DATA=synthetic,VIT_CP=24 scripts/aurora_run.sh
 #
-# VIT_VENV must hold a PyTorch nightly for XPU and TorchTitan at the pinned
-# commit (see README.md).
+# Defaults: 12 tiles per node, config vit3d_scaling. Configs are the functions
+# in vit3d/recipes.py; VIT_* variables (problem size, parallelism, data) reach
+# every rank, see vit3d_scaling. VIT_VENV must hold a PyTorch XPU nightly and
+# TorchTitan at the pinned commit (README.md). Output goes to
+# outputs/<config>_<tiles>tiles_<time>/ unless VIT_OUT is set.
 set -eo pipefail
 
-usage="usage: VIT_VENV=<venv> $0 <tiles per node (1-12)> <config> [output dir]"
-TILES=${1:?$usage}
-CONFIG=${2:?$usage}
+TILES=${1:-${TILES:-12}}
+CONFIG=${2:-${CONFIG:-vit3d_scaling}}
 if (( TILES < 1 || TILES > 12 )); then
   echo "tiles per node must be 1-12 (an Aurora node has 12 tiles)" >&2; exit 1
 fi
 if [[ -z ${VIT_VENV} ]]; then
   echo "set VIT_VENV to the venv with the PyTorch XPU nightly and TorchTitan" >&2; exit 1
 fi
-HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-OUT=${3:-${HERE}/outputs/${CONFIG}_${TILES}tiles_$(date +%Y%m%d_%H%M%S)}
+# PBS runs a copy of this script, so locate the code from the submit directory.
+if [[ ${PBS_ENVIRONMENT:-} == PBS_BATCH ]]; then
+  HERE=${PBS_O_WORKDIR}
+else
+  HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+fi
+if [[ ! -f ${HERE}/vit3d/recipes.py ]]; then
+  echo "cannot find vit3d/ in ${HERE}; run or submit from the torchtitan_vit directory" >&2; exit 1
+fi
+cd "${HERE}"
+OUT=${VIT_OUT:-${HERE}/outputs/${CONFIG}_${TILES}tiles_$(date +%Y%m%d_%H%M%S)}
 
 # Environment. The frameworks module only provides Python 3.12; its packages
 # are kept out (unset PYTHONPATH, venv without system site-packages), and the

@@ -21,7 +21,7 @@ vit3d/model.py       ViT3DModel (a TorchTitan Decoder subclass), sharding contra
 vit3d/flavors.py     model sizes and the sharded config builder
 vit3d/data.py        volumetric loader: HDF5/synthetic -> patchify -> pinned memory -> device
 vit3d/recipes.py     vit3d_scaling (benchmark entry point) and vit3d_debug_* test recipes
-scripts/aurora_vit3d.pbs   PBS template for Aurora
+scripts/aurora_run.sh      Aurora launcher: run on a compute node or submit with qsub
 tools/make_synthetic_h5.py writes HDF5 shards for the I/O path
 tests/                     CPU/gloo harness and the parallelism equivalence matrix
 ```
@@ -146,16 +146,16 @@ git clone https://github.com/pytorch/torchtitan && cd torchtitan
 git checkout ff96670a26c7079bc1b9049f5b6942adf35567c1
 pip install -r requirements.txt && pip install -e .
 
-# On a compute node (qsub -I) or in a job: <tiles per node> <config>
+# One script, scripts/aurora_run.sh, either on a compute node (qsub -I)...
 export VIT_VENV=$VENV
-scripts/aurora_run.sh 1 vit3d_debug
+scripts/aurora_run.sh 1 vit3d_debug                       # <tiles per node> <config>
 scripts/aurora_run.sh 2 vit3d_debug_fsdp
 VIT_DATA=synthetic VIT_FLAVOR=large_h48 VIT_VOLUME=256 VIT_CP=12 \
   scripts/aurora_run.sh 12 vit3d_scaling
 
-# Batch job (12 tiles per node, every node in the job)
-qsub -l select=8 -v VIT_VENV=$VENV,VIT_TP=2,VIT_CP=6,VIT_VOLUME=512,VIT_DATA_GLOB='/path/*.h5' \
-  scripts/aurora_vit3d.pbs
+# ...or as a batch job (set its #PBS -A line; arguments go in -v)
+qsub -l select=8 -q debug-scaling -v VIT_VENV=$VENV,VIT_TP=2,VIT_CP=6,VIT_VOLUME=512,VIT_DATA_GLOB='/path/*.h5' \
+  scripts/aurora_run.sh
 ```
 
 ## Validation
