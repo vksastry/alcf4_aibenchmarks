@@ -52,6 +52,13 @@ OUT=${VIT_OUT:-${HERE}/outputs/${CONFIG}_${TILES}tiles_$(date +%Y%m%d_%H%M%S)}
 # venv's Intel runtime (libsycl, libur_loader) must come before the system
 # oneAPI on LD_LIBRARY_PATH, or torch fails to import.
 type module >/dev/null 2>&1 || source /etc/profile
+# Pick Aurora's PALS mpiexec before the venv is activated: the XPU wheels
+# install an Intel MPI (Hydra) mpiexec into the venv, which shadows it.
+MPIEXEC=${VIT_MPIEXEC:-$(command -v mpiexec)}
+if [[ ${MPIEXEC} == "${VIT_VENV}"* ]]; then
+  echo "mpiexec resolves to the venv (${MPIEXEC}); set VIT_MPIEXEC to Aurora's" \
+    "PALS mpiexec, e.g. /opt/cray/pals/1.8/bin/mpiexec" >&2; exit 1
+fi
 module load frameworks
 unset PYTHONPATH
 source "${VIT_VENV}/bin/activate"
@@ -80,13 +87,13 @@ mkdir -p "${OUT}"
   echo "config=${CONFIG} nodes=${NNODES} tiles/node=${TILES} ranks=${WORLD_SIZE}"
   echo "output=${OUT}"
   echo "torch=$(python -c 'import torch; print(torch.__version__)' 2>/dev/null)"
-  echo "mpiexec=$(command -v mpiexec)"
+  echo "mpiexec=${MPIEXEC}"
   env | grep '^VIT_' | sort || true
 } | tee "${OUT}/run_info.txt"
 
 # The launcher gives each rank its global and local rank under PALS, PMIx or
 # PMI names depending on the MPI stack; LOCAL_RANK picks the tile.
-mpiexec -n "${WORLD_SIZE}" --ppn "${TILES}" --cpu-bind="${BIND}" \
+"${MPIEXEC}" -n "${WORLD_SIZE}" --ppn "${TILES}" --cpu-bind="${BIND}" \
   bash -c 'export RANK=${PALS_RANKID:-${PMIX_RANK:-${PMI_RANK:-}}}
            export LOCAL_RANK=${PALS_LOCAL_RANKID:-${MPI_LOCALRANKID:-${PMI_LOCAL_RANK:-}}}
            if [[ -z ${RANK} || -z ${LOCAL_RANK} ]]; then
