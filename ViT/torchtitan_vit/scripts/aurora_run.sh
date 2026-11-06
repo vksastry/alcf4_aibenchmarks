@@ -80,12 +80,20 @@ mkdir -p "${OUT}"
   echo "config=${CONFIG} nodes=${NNODES} tiles/node=${TILES} ranks=${WORLD_SIZE}"
   echo "output=${OUT}"
   echo "torch=$(python -c 'import torch; print(torch.__version__)' 2>/dev/null)"
+  echo "mpiexec=$(command -v mpiexec)"
   env | grep '^VIT_' | sort || true
 } | tee "${OUT}/run_info.txt"
 
-# PALS gives each rank its global and local rank; LOCAL_RANK picks the tile.
+# The launcher gives each rank its global and local rank under PALS, PMIx or
+# PMI names depending on the MPI stack; LOCAL_RANK picks the tile.
 mpiexec -n "${WORLD_SIZE}" --ppn "${TILES}" --cpu-bind="${BIND}" \
-  bash -c 'export RANK=${PALS_RANKID} LOCAL_RANK=${PALS_LOCAL_RANKID};
+  bash -c 'export RANK=${PALS_RANKID:-${PMIX_RANK:-${PMI_RANK:-}}}
+           export LOCAL_RANK=${PALS_LOCAL_RANKID:-${MPI_LOCALRANKID:-${PMI_LOCAL_RANK:-}}}
+           if [[ -z ${RANK} || -z ${LOCAL_RANK} ]]; then
+             echo "mpiexec set no rank variables; rank-related environment:" >&2
+             env | grep -E "^(PALS|PMIX|PMI|MPI_LOCAL)" | sort >&2
+             exit 1
+           fi
            exec python -m torchtitan.train --module vit3d.recipes \
              --config "${VIT_CONFIG}" --output-dir "${VIT_OUT_DIR}"' \
   2>&1 | tee "${OUT}/train.log"
