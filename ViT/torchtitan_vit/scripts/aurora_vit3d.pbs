@@ -1,0 +1,61 @@
+#!/bin/bash
+# Template PBS job for the 3D ViT benchmark on Aurora (12 GPU tiles per node).
+# Not yet run on Aurora: check the module, venv and binding lines against the
+# current ALCF documentation before the first submission.
+#
+#   qsub -l select=8 -v VIT_TP=2,VIT_CP=6,VIT_VOLUME=512 scripts/aurora_vit3d.pbs
+#
+#PBS -A <project>
+#PBS -q debug-scaling
+#PBS -l walltime=00:30:00
+#PBS -l filesystems=home:flare
+#PBS -l select=2
+#PBS -j oe
+
+set -euo pipefail
+cd "${PBS_O_WORKDIR}"
+
+# TorchTitan main needs a PyTorch nightly; the frameworks module ships a
+# release build, so use a venv with the XPU nightly wheels:
+#   pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/xpu
+#   pip install -r <torchtitan>/requirements.txt && pip install -e <torchtitan>
+source "${VIT_VENV:?set VIT_VENV to the venv with torch nightly + torchtitan}/bin/activate"
+
+NNODES=$(wc -l < "${PBS_NODEFILE}")
+PPN=12
+export MASTER_ADDR=$(head -n 1 "${PBS_NODEFILE}")
+export MASTER_PORT=29500
+export PYTHONPATH="${PBS_O_WORKDIR}${PYTHONPATH:+:${PYTHONPATH}}"
+
+# Problem size and parallelism; see vit3d/recipes.py:vit3d_scaling.
+export VIT_FLAVOR=${VIT_FLAVOR:-large_h48}
+export VIT_VOLUME=${VIT_VOLUME:-256}
+export VIT_PATCH=${VIT_PATCH:-8}
+export VIT_TP=${VIT_TP:-1}
+export VIT_CP=${VIT_CP:-12}
+export VIT_CP_BACKEND=${VIT_CP_BACKEND:-ulysses}
+export VIT_PP=${VIT_PP:-1}
+export VIT_DP_REPLICATE=${VIT_DP_REPLICATE:-1}
+export VIT_DP_SHARD=${VIT_DP_SHARD:--1}
+# Default reads HDF5 from disk (set VIT_DATA_GLOB); VIT_DATA=synthetic runs without data.
+export VIT_DATA=${VIT_DATA:-hdf5}
+if [[ ${VIT_DATA} == hdf5 && -z ${VIT_DATA_GLOB:-} ]]; then
+  echo "VIT_DATA=hdf5 needs VIT_DATA_GLOB (or set VIT_DATA=synthetic)" >&2; exit 1
+fi
+export VIT_MEASURE_H2D=${VIT_MEASURE_H2D:-1}
+export VIT_STEPS=${VIT_STEPS:-30}
+
+OUT=${VIT_OUT:-${PBS_O_WORKDIR}/outputs/vit3d_${PBS_JOBID%%.*}}
+mkdir -p "${OUT}"
+
+# One rank per tile. torch.distributed reads RANK/LOCAL_RANK/WORLD_SIZE; map
+# them from PALS. CPU binding keeps each rank and its loader workers on the
+# socket local to its tile (two sockets, six tiles each).
+mpiexec -n $((NNODES * PPN)) --ppn ${PPN} \
+  --cpu-bind=list:1-8:9-16:17-24:25-32:33-40:41-48:53-60:61-68:69-76:77-84:85-92:93-100 \
+  bash -c '
+    export RANK=${PALS_RANKID} LOCAL_RANK=${PALS_LOCAL_RANKID}
+    export WORLD_SIZE=$(( '"${NNODES}"' * '"${PPN}"' ))
+    exec python -m torchtitan.train --module vit3d.recipes --config vit3d_scaling \
+      --output-dir '"${OUT}"'
+  ' 2>&1 | tee "${OUT}/train.log"
