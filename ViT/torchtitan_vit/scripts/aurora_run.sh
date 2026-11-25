@@ -68,6 +68,9 @@ export PYTHONPATH="${HERE}"
 # One device per tile (12 per node); COMPOSITE shows one per GPU (6), and
 # ranks 6-11 then find no device.
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+# Loader workers hand batches back over AF_UNIX sockets created in TMPDIR,
+# whose path is limited to 107 characters; the per-job PBS TMPDIR is longer.
+export TMPDIR=/tmp
 
 # Rendezvous for torch.distributed.
 if [[ -n ${PBS_NODEFILE:-} ]]; then
