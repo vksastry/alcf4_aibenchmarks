@@ -65,6 +65,9 @@ unset PYTHONPATH
 source "${VIT_VENV}/bin/activate"
 export LD_LIBRARY_PATH="${VIT_VENV}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 export PYTHONPATH="${HERE}"
+# One device per tile (12 per node); COMPOSITE shows one per GPU (6), and
+# ranks 6-11 then find no device.
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
 
 # Rendezvous for torch.distributed.
 if [[ -n ${PBS_NODEFILE:-} ]]; then
