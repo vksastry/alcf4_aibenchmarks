@@ -61,9 +61,10 @@ MODEL_FLAVORS: dict[str, ViTFlavor] = {
     "huge": ViTFlavor(dim=1280, n_layers=32, n_heads=16, ffn_hidden_dim=3584),
     "giant": ViTFlavor(dim=1536, n_layers=40, n_heads=24, ffn_hidden_dim=4096),
     # Wider heads count so Ulysses can span a 12-tile Aurora node (cp*tp | 48).
-    "large_h48": ViTFlavor(
-        dim=1536, n_layers=24, n_heads=48, ffn_hidden_dim=_swiglu_hidden(1536)
-    ),
+    # FSDP shards the fused (2, hidden, dim) SwiGLU weight on dim 1 and cannot
+    # pad it, so hidden must divide by the FSDP size (dp_shard * cp): 3840 =
+    # 768 * 5 divides by every 2^a * 3 up to 768 (12 tiles, 24, ..., 768 ranks).
+    "large_h48": ViTFlavor(dim=1536, n_layers=24, n_heads=48, ffn_hidden_dim=3840),
 }
 
 _LINEAR_INIT = {
