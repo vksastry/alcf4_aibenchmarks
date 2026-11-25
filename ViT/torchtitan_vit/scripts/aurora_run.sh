@@ -24,7 +24,8 @@
 # in vit3d/recipes.py; VIT_* variables (problem size, parallelism, data) reach
 # every rank, see vit3d_scaling. VIT_VENV must hold a PyTorch XPU nightly and
 # TorchTitan at the pinned commit (README.md). Output goes to
-# outputs/<config>_<tiles>tiles_<time>/ unless VIT_OUT is set.
+# outputs/<config>_<tiles>tiles_<time>/ unless VIT_OUT is set; summary.json
+# there holds the metrics averaged over the steps after VIT_WARMUP (5).
 set -eo pipefail
 
 TILES=${1:-${TILES:-12}}
@@ -93,6 +94,7 @@ mkdir -p "${OUT}"
 
 # The launcher gives each rank its global and local rank under PALS, PMIx or
 # PMI names depending on the MPI stack; LOCAL_RANK picks the tile.
+status=0
 "${MPIEXEC}" -n "${WORLD_SIZE}" --ppn "${TILES}" --cpu-bind="${BIND}" \
   bash -c 'export RANK=${PALS_RANKID:-${PMIX_RANK:-${PMI_RANK:-}}}
            export LOCAL_RANK=${PALS_LOCAL_RANKID:-${MPI_LOCALRANKID:-${PMI_LOCAL_RANK:-}}}
@@ -103,4 +105,10 @@ mkdir -p "${OUT}"
            fi
            exec python -m torchtitan.train --module vit3d.recipes \
              --config "${VIT_CONFIG}" --output-dir "${VIT_OUT_DIR}"' \
-  2>&1 | tee "${OUT}/train.log"
+  2>&1 | tee "${OUT}/train.log" || status=$?
+
+# Average the step metrics after VIT_WARMUP steps into OUT/summary.json, and
+# append a row to VIT_RESULTS_CSV if set (scripts/aurora_sweep.sh sets it).
+python "${HERE}/tools/summarize_run.py" "${OUT}" --warmup "${VIT_WARMUP:-5}" \
+  ${VIT_RESULTS_CSV:+--csv "${VIT_RESULTS_CSV}"} || true
+exit ${status}

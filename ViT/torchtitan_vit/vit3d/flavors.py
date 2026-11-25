@@ -65,6 +65,13 @@ MODEL_FLAVORS: dict[str, ViTFlavor] = {
     # pad it, so hidden must divide by the FSDP size (dp_shard * cp): 3840 =
     # 768 * 5 divides by every 2^a * 3 up to 768 (12 tiles, 24, ..., 768 ranks).
     "large_h48": ViTFlavor(dim=1536, n_layers=24, n_heads=48, ffn_hidden_dim=3840),
+    # Model-size sweep that shards evenly on 12-tile multiples: head_dim 64,
+    # heads divisible by 12 (Ulysses or TP over a node), and dim and FFN
+    # hidden multiples of 768 (FFN ~8/3 * dim). Parameters: 92M, 651M, 2.0B, 4.6B.
+    "w768": ViTFlavor(dim=768, n_layers=12, n_heads=12, ffn_hidden_dim=2304),
+    "w1536": ViTFlavor(dim=1536, n_layers=24, n_heads=24, ffn_hidden_dim=3840),
+    "w2304": ViTFlavor(dim=2304, n_layers=32, n_heads=36, ffn_hidden_dim=6144),
+    "w3072": ViTFlavor(dim=3072, n_layers=40, n_heads=48, ffn_hidden_dim=8448),
 }
 
 _LINEAR_INIT = {

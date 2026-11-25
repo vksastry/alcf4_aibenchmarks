@@ -158,6 +158,32 @@ qsub -l select=8 -q debug-scaling -v VIT_VENV=$VENV,VIT_TP=2,VIT_CP=6,VIT_VOLUME
   scripts/aurora_run.sh
 ```
 
+Every run writes `summary.json` to its output directory: TorchTitan's `tps`,
+`tflops` and `mfu` averaged over the steps after `VIT_WARMUP` (default 5) and
+over ranks, peak memory, and the averaged `loader`, `data_rate` and
+`host_to_device` numbers (`tools/summarize_run.py`).
+
+### Throughput sweeps
+
+`scripts/aurora_sweep.sh` runs a set of cases on an interactive node, one
+`aurora_run.sh` run each (30 steps, 10 warm-up, synthetic data by default),
+and collects one row per case in `outputs/sweep_*/results.csv`:
+
+| Sweep | Varies | Fixed |
+|---|---|---|
+| `layouts` | FSDP, DDP, HSDP, TP, CP Ulysses, CP all-gather K/V, PP 2 and 4, TP x CP, TP x CP x FSDP | `w1536`, 192x256x256, patch 8 (24,576 tokens) |
+| `model` | `w768`, `w1536`, `w2304`, `w3072` (92M to 4.6B parameters) | 24,576 tokens, CP over the node |
+| `context` | volume and patch: 13,824 to 393,216 tokens | `w1536`, CP over the node |
+
+```bash
+scripts/aurora_sweep.sh layouts        # or model, context, all
+FLAVOR=w2304 STEPS=40 scripts/aurora_sweep.sh layouts
+```
+
+The `w*` flavors are sized to shard evenly over multiples of 12 tiles: FSDP
+cannot shard the fused SwiGLU weight unevenly, and the token count must divide
+by the CP degree.
+
 ## Validation
 
 `tests/run_cpu_matrix.sh` runs every parallelism on CPU with gloo, using a
