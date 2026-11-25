@@ -43,16 +43,31 @@ OUT=${SWEEP_OUT:-${HERE}/outputs/sweep_${SWEEP}_${TILES}tiles_$(date +%Y%m%d_%H%
 CSV=${OUT}/results.csv
 mkdir -p "${OUT}"
 
+# Ctrl-C stops the running case (timeout passes the signal to its process
+# group, which includes mpiexec and the ranks) and the whole sweep.
+CASE_PID=
+stop_sweep() {
+  echo "sweep interrupted; stopping the running case" >&2
+  [[ -n ${CASE_PID} ]] && kill -TERM "${CASE_PID}" 2>/dev/null && wait "${CASE_PID}"
+  exit 130
+}
+trap stop_sweep INT TERM
+
 run_case() {  # run_case <name> [VIT_X=value ...]
   local name=$1; shift
   local dir=${OUT}/${name}
   mkdir -p "${dir}"
   echo "=== ${name}: $*"
+  # timeout puts the case in its own process group, out of reach of Ctrl-C;
+  # run it in the background so the trap below can stop it.
   env VIT_STEPS="${STEPS}" VIT_WARMUP="${WARMUP}" VIT_OUT="${dir}" \
       VIT_RESULTS_CSV="${CSV}" "$@" \
     timeout "${CASE_TIMEOUT}" "${HERE}/scripts/aurora_run.sh" "${TILES}" vit3d_scaling \
-    > "${dir}/console.log" 2>&1
+    > "${dir}/console.log" 2>&1 &
+  CASE_PID=$!
+  wait "${CASE_PID}"
   local status=$?
+  CASE_PID=
   # aurora_run.sh writes the CSV row itself; record cases that never got that far.
   if ! grep -q "^${name}," "${CSV}" 2>/dev/null; then
     echo "${name},FAILED (exit ${status}; see ${dir}/console.log)" >> "${CSV}"
